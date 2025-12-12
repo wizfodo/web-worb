@@ -1,0 +1,84 @@
+services:
+  # 1. Database (MySQL)
+  mysql_db:
+    image: mysql:8.0
+    container_name: worddee_mysql
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: webwords_db
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # 2. Workflow Automation (n8n)
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: worddee_n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      # ปิด Auth เพื่อให้ Python เข้าไปสร้าง Workflow อัตโนมัติได้
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - GENERIC_TIMEZONE=Asia/Bangkok
+      - TZ=Asia/Bangkok
+      - WEBHOOK_URL=http://localhost:5678/
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - app-network
+
+  # 3. Backend (FastAPI + Auto Setup Script)
+  backend:
+    build: ./backend
+    container_name: worddee_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_TYPE=mysql
+      - DB_HOST=mysql_db
+      - DB_NAME=webwords_db
+      - DB_USER=root
+      - DB_PASS=rootpassword
+      - DB_PORT=3306
+      - N8N_URL=http://n8n:5678/webhook
+      - N8N_API_URL=http://n8n:5678/api/v1
+    depends_on:
+      mysql_db:
+        condition: service_healthy
+      n8n:
+        condition: service_started
+    networks:
+      - app-network
+
+  # 4. Frontend (Next.js)
+  frontend:
+    build: ./frontend
+    container_name: worddee_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  n8n_data:
